@@ -568,139 +568,156 @@ class PresetCatalogGenerator:
             print("[Catalog] No preset files found.")
             return (output_excel, 0, 0)
 
+        # Group presets by their immediate parent directory name
+        from collections import defaultdict
+        grouped_presets = defaultdict(list)
+        for p in preset_files:
+            parent_dir = os.path.basename(os.path.dirname(p))
+            if not parent_dir:
+                parent_dir = "根目录"
+            grouped_presets[parent_dir].append(p)
+
         # Create workbook
         wb = Workbook()
         wb.remove(wb.active)
 
-        total_sheets = (total + rows_per_sheet - 1) // rows_per_sheet
         success_count = 0
         fail_count = 0
+        total_sheets = 0
         start_time = time.time()
 
         # Temp directory for preview images (needed for repeated wb.save)
         import tempfile
-        import shutil
-        temp_dir = tempfile.mkdtemp(prefix="preset_catalog_")
+        
+        with tempfile.TemporaryDirectory(prefix="preset_catalog_") as temp_dir:
+            # Styling
+            header_font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
+            header_align = Alignment(horizontal="center", vertical="center")
+            cell_font = Font(name="Arial", size=10)
+            cell_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
+            center_align = Alignment(horizontal="center", vertical="center")
+            thin_border = Border(
+                left=Side(style="thin"), right=Side(style="thin"),
+                top=Side(style="thin"), bottom=Side(style="thin"),
+            )
 
-        # Styling
-        header_font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
-        header_fill = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
-        header_align = Alignment(horizontal="center", vertical="center")
-        cell_font = Font(name="Arial", size=10)
-        cell_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
-        center_align = Alignment(horizontal="center", vertical="center")
-        thin_border = Border(
-            left=Side(style="thin"), right=Side(style="thin"),
-            top=Side(style="thin"), bottom=Side(style="thin"),
-        )
+            processed_count = 0
 
-        ws = None
+            for folder_name, files_in_folder in grouped_presets.items():
+                safe_folder = folder_name[:25].replace(":", "").replace("\\", "").replace("/", "").replace("?", "").replace("*", "").replace("[", "(").replace("]", ")")
+                files_in_folder.sort()
+                
+                for idx, preset_path in enumerate(files_in_folder):
+                    sheet_idx = idx // rows_per_sheet
+                    row_in_sheet = idx % rows_per_sheet
 
-        for i, preset_path in enumerate(preset_files):
-            sheet_idx = i // rows_per_sheet
-            row_in_sheet = i % rows_per_sheet
+                    if row_in_sheet == 0:
+                        if len(files_in_folder) > rows_per_sheet:
+                            sheet_name = f"{safe_folder}[{sheet_idx}]"
+                        else:
+                            sheet_name = safe_folder
+                        
+                        sheet_name = sheet_name[:31]
+                        base_sheet_name = sheet_name
+                        counter = 1
+                        while sheet_name in wb.sheetnames:
+                            suffix = f"_{counter}"
+                            sheet_name = f"{base_sheet_name[:31-len(suffix)]}{suffix}"
+                            counter += 1
+                            
+                        ws = wb.create_sheet(title=sheet_name)
+                        # Header row
+                        headers = ["#", "Filename", "Preview", "File Path"]
+                        col_widths = [8, 35, 30, 80]
+                        for col_idx, (hdr, wid) in enumerate(zip(headers, col_widths), 1):
+                            cell = ws.cell(row=1, column=col_idx, value=hdr)
+                            cell.font = header_font
+                            cell.fill = header_fill
+                            cell.alignment = header_align
+                            cell.border = thin_border
+                            ws.column_dimensions[get_column_letter(col_idx)].width = wid
+                        ws.row_dimensions[1].height = 30
+                        total_sheets += 1
 
-            # Create new sheet if needed
-            if row_in_sheet == 0:
-                sheet_name = f"Page_{sheet_idx + 1}" if total_sheets > 1 else "Presets"
-                ws = wb.create_sheet(title=sheet_name)
-                # Header row
-                headers = ["#", "Filename", "Preview", "File Path"]
-                col_widths = [8, 35, 30, 80]
-                for col_idx, (hdr, wid) in enumerate(zip(headers, col_widths), 1):
-                    cell = ws.cell(row=1, column=col_idx, value=hdr)
-                    cell.font = header_font
-                    cell.fill = header_fill
-                    cell.alignment = header_align
-                    cell.border = thin_border
-                    ws.column_dimensions[get_column_letter(col_idx)].width = wid
-                ws.row_dimensions[1].height = 30
+                    filename = os.path.basename(preset_path)
+                    excel_row = row_in_sheet + 2  # +1 header, +1 one-based
 
-            filename = os.path.basename(preset_path)
-            excel_row = row_in_sheet + 2  # +1 header, +1 one-based
+                    processed_count += 1
+                    elapsed = time.time() - start_time
+                    avg = elapsed / processed_count
+                    remain = avg * (total - processed_count)
+                    print(f"  [{processed_count}/{total}] [{folder_name}] {filename} (eta: {remain:.0f}s)", end="")
 
-            # Progress log
-            elapsed = time.time() - start_time
-            avg = elapsed / (i + 1) if i > 0 else 0
-            remain = avg * (total - i - 1)
-            print(f"  [{i + 1}/{total}] {filename} (eta: {remain:.0f}s)", end="")
+                    # Apply preset
+                    preview_pil = None
+                    try:
+                        ext = os.path.splitext(preset_path)[1].lower()
+                        if ext == ".lrtemplate":
+                            parsed = parse_lrtemplate(preset_path)
+                            settings = get_settings(parsed)
+                            result_np = apply_preset(img_np, settings, 1.0)
+                        elif ext == ".xmp":
+                            parsed = parse_xmp(preset_path)
+                            settings = parsed.get("settings", {})
+                            result_np = apply_preset(img_np, settings, 1.0)
+                        elif ext == ".cube":
+                            lut_data = parse_cube(preset_path)
+                            result_np = apply_cube_lut(img_np, lut_data, 1.0)
+                        else:
+                            raise ValueError(f"Unsupported: {ext}")
 
-            # Apply preset
-            preview_pil = None
-            try:
-                ext = os.path.splitext(preset_path)[1].lower()
-                if ext == ".lrtemplate":
-                    parsed = parse_lrtemplate(preset_path)
-                    settings = get_settings(parsed)
-                    result_np = apply_preset(img_np, settings, 1.0)
-                elif ext == ".xmp":
-                    parsed = parse_xmp(preset_path)
-                    settings = parsed.get("settings", {})
-                    result_np = apply_preset(img_np, settings, 1.0)
-                elif ext == ".cube":
-                    lut_data = parse_cube(preset_path)
-                    result_np = apply_cube_lut(img_np, lut_data, 1.0)
-                else:
-                    raise ValueError(f"Unsupported: {ext}")
+                        # Make thumbnail
+                        result_clipped = np.clip(result_np, 0, 1)
+                        pil_img = PILImage.fromarray((result_clipped * 255).astype(np.uint8))
+                        ratio = preview_width / pil_img.width
+                        new_h = int(pil_img.height * ratio)
+                        preview_pil = pil_img.resize((preview_width, new_h), PILImage.LANCZOS)
+                        success_count += 1
+                        print(" OK")
+                    except Exception as e:
+                        fail_count += 1
+                        print(f" FAIL: {e}")
 
-                # Make thumbnail
-                result_clipped = np.clip(result_np, 0, 1)
-                pil_img = PILImage.fromarray((result_clipped * 255).astype(np.uint8))
-                ratio = preview_width / pil_img.width
-                new_h = int(pil_img.height * ratio)
-                preview_pil = pil_img.resize((preview_width, new_h), PILImage.LANCZOS)
-                success_count += 1
-                print(" OK")
-            except Exception as e:
-                fail_count += 1
-                print(f" FAIL: {e}")
+                    # Write row
+                    c = ws.cell(row=excel_row, column=1, value=idx + 1)
+                    c.font = cell_font; c.alignment = center_align; c.border = thin_border
+                    
+                    c = ws.cell(row=excel_row, column=2, value=filename)
+                    c.font = cell_font; c.alignment = cell_align; c.border = thin_border
+                    
+                    c = ws.cell(row=excel_row, column=3)
+                    c.border = thin_border
+                    if preview_pil is not None:
+                        tmp_path = os.path.join(temp_dir, f"preview_{processed_count}.png")
+                        preview_pil.save(tmp_path, format="PNG")
+                        xl_img = XlImage(tmp_path)
+                        xl_img.width = preview_width
+                        xl_img.height = preview_pil.height
+                        ws.add_image(xl_img, f"C{excel_row}")
+                        ws.row_dimensions[excel_row].height = max(preview_pil.height * 0.75, 20)
+                    else:
+                        c.value = "Failed"
+                        c.font = Font(name="Arial", size=10, color="FF0000")
+                        c.alignment = center_align
+                        ws.row_dimensions[excel_row].height = 25
+                        
+                    c = ws.cell(row=excel_row, column=4, value=preset_path)
+                    c.font = cell_font; c.alignment = cell_align; c.border = thin_border
 
-            # Write row
-            # Col A: index
-            c = ws.cell(row=excel_row, column=1, value=i + 1)
-            c.font = cell_font; c.alignment = center_align; c.border = thin_border
-            # Col B: filename
-            c = ws.cell(row=excel_row, column=2, value=filename)
-            c.font = cell_font; c.alignment = cell_align; c.border = thin_border
-            # Col C: preview
-            c = ws.cell(row=excel_row, column=3)
-            c.border = thin_border
-            if preview_pil is not None:
-                # Save preview to temp file (not BytesIO) so wb.save() can re-read
-                tmp_path = os.path.join(temp_dir, f"preview_{i}.png")
-                preview_pil.save(tmp_path, format="PNG")
-                xl_img = XlImage(tmp_path)
-                xl_img.width = preview_width
-                xl_img.height = preview_pil.height
-                ws.add_image(xl_img, f"C{excel_row}")
-                ws.row_dimensions[excel_row].height = max(preview_pil.height * 0.75, 20)
-            else:
-                c.value = "Failed"
-                c.font = Font(name="Arial", size=10, color="FF0000")
-                c.alignment = center_align
-                ws.row_dimensions[excel_row].height = 25
-            # Col D: path
-            c = ws.cell(row=excel_row, column=4, value=preset_path)
-            c.font = cell_font; c.alignment = cell_align; c.border = thin_border
+                    # Save every 50 rows
+                    if processed_count % 50 == 0:
+                        try:
+                            wb.save(output_excel)
+                            print(f"  [Catalog] Saved progress: {processed_count}/{total}")
+                        except Exception as save_err:
+                            print(f"  [Catalog] Warning: save failed: {save_err}")
 
-            # Save every 50 rows to reduce disk I/O pressure
-            if (i + 1) % 50 == 0:
-                try:
-                    wb.save(output_excel)
-                    print(f"  [Catalog] Saved progress: {i + 1}/{total}")
-                except Exception as save_err:
-                    print(f"  [Catalog] Warning: save failed: {save_err}")
-
-        # Final save
-        wb.save(output_excel)
+            # Final save
+            wb.save(output_excel)
+            
         elapsed = time.time() - start_time
         print(f"[Catalog] Done! {success_count} ok, {fail_count} failed, {elapsed:.1f}s -> {output_excel}")
-
-        # Cleanup temp files
-        try:
-            shutil.rmtree(temp_dir)
-        except Exception:
-            pass
 
         return (output_excel, success_count, fail_count)
 

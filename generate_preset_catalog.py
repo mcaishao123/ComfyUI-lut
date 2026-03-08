@@ -261,107 +261,126 @@ def main():
         print(f"    {ext}: {count} 个")
     print()
 
+    # Group presets by their immediate parent directory name
+    from collections import defaultdict
+    grouped_presets = defaultdict(list)
+    for p in preset_files:
+        parent_dir = os.path.basename(os.path.dirname(p))
+        if not parent_dir:
+            parent_dir = "根目录"
+        grouped_presets[parent_dir].append(p)
+
     # Create workbook
     wb = Workbook()
     # Remove default sheet
     wb.remove(wb.active)
 
-    total_sheets = (total + ROWS_PER_SHEET - 1) // ROWS_PER_SHEET
     success_count = 0
     fail_count = 0
-
-    # Temp directory for preview images (BytesIO gets closed after wb.save)
-    import tempfile
-    import shutil
-    temp_dir = tempfile.mkdtemp(prefix="preset_catalog_")
-
+    total_sheets = 0
     start_time = time.time()
+    processed_count = 0
 
-    for i, preset_path in enumerate(preset_files):
-        # Determine which sheet
-        sheet_idx = i // ROWS_PER_SHEET
-        row_in_sheet = i % ROWS_PER_SHEET
+    import tempfile
+    
+    # Use a context manager to guarantee cleanup even on crash or manual interrupt
+    with tempfile.TemporaryDirectory(prefix="preset_catalog_") as temp_dir:
+        for folder_name, files_in_folder in grouped_presets.items():
+            # Sanitize folder name for Excel sheet (max 31 chars, no brackets usually but we'll manage length)
+            safe_folder = folder_name[:25].replace(":", "").replace("\\", "").replace("/", "").replace("?", "").replace("*", "").replace("[", "(").replace("]", ")")
+            
+            # Sort files in folder
+            files_in_folder.sort()
+            
+            for idx, preset_path in enumerate(files_in_folder):
+                sheet_idx = idx // ROWS_PER_SHEET
+                row_in_sheet = idx % ROWS_PER_SHEET
+                
+                if row_in_sheet == 0:
+                    # Create a new sheet
+                    if len(files_in_folder) > ROWS_PER_SHEET:
+                        sheet_name = f"{safe_folder}[{sheet_idx}]"
+                    else:
+                        sheet_name = safe_folder
+                    
+                    # Excel sheet names must be unique and <= 31 chars
+                    sheet_name = sheet_name[:31]
+                    base_sheet_name = sheet_name
+                    counter = 1
+                    while sheet_name in wb.sheetnames:
+                        suffix = f"_{counter}"
+                        sheet_name = f"{base_sheet_name[:31-len(suffix)]}{suffix}"
+                        counter += 1
+                    
+                    ws = wb.create_sheet(title=sheet_name)
+                    create_sheet_header(ws)
+                    total_sheets += 1
 
-        # Create new sheet if needed
-        if row_in_sheet == 0:
-            sheet_name = f"预设目录_{sheet_idx + 1}" if total_sheets > 1 else "预设目录"
-            ws = wb.create_sheet(title=sheet_name)
-            create_sheet_header(ws)
+                filename = os.path.basename(preset_path)
+                processed_count += 1
+                elapsed = time.time() - start_time
+                avg_time = elapsed / processed_count
+                remaining = avg_time * (total - processed_count)
+                print(f"  [{processed_count}/{total}] [{folder_name}] {filename}  (预计剩余: {remaining:.0f}秒)", end="")
 
-        filename = os.path.basename(preset_path)
+                try:
+                    result_np = apply_preset_to_image(image_np, preset_path)
+                    preview = numpy_to_pil_thumbnail(result_np)
+                    success_count += 1
+                    print("  ✅")
+                except Exception as e:
+                    preview = None
+                    fail_count += 1
+                    print(f"  ❌ {e}")
 
-        # Progress
-        elapsed = time.time() - start_time
-        avg_time = elapsed / (i + 1) if i > 0 else 0
-        remaining = avg_time * (total - i - 1)
-        print(f"  [{i + 1}/{total}] {filename}  (预计剩余: {remaining:.0f}秒)", end="")
+                # Add to Excel
+                excel_row = row_in_sheet + 2  # +1 header, +1 for 0-index
 
-        # Apply preset
-        try:
-            result_np = apply_preset_to_image(image_np, preset_path)
-            preview = numpy_to_pil_thumbnail(result_np)
-            success_count += 1
-            print("  ✅")
-        except Exception as e:
-            preview = None
-            fail_count += 1
-            print(f"  ❌ {e}")
+                cell_font = Font(name="微软雅黑", size=10)
+                cell_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
+                center_align = Alignment(horizontal="center", vertical="center")
+                thin_border = Border(
+                    left=Side(style="thin"), right=Side(style="thin"),
+                    top=Side(style="thin"), bottom=Side(style="thin"),
+                )
 
-        # Add to Excel (use temp file for preview image)
-        excel_row = row_in_sheet + 1 + 1  # +1 header, +1 one-based
+                c = ws.cell(row=excel_row, column=1, value=idx + 1)
+                c.font = cell_font; c.alignment = center_align; c.border = thin_border
+                
+                c = ws.cell(row=excel_row, column=2, value=filename)
+                c.font = cell_font; c.alignment = cell_align; c.border = thin_border
+                
+                c = ws.cell(row=excel_row, column=3)
+                c.border = thin_border
+                if preview is not None:
+                    tmp_path = os.path.join(temp_dir, f"preview_{processed_count}.png")
+                    preview.save(tmp_path, format="PNG")
+                    xl_img = XlImage(tmp_path)
+                    xl_img.width = PREVIEW_WIDTH
+                    xl_img.height = preview.height
+                    ws.add_image(xl_img, f"C{excel_row}")
+                    ws.row_dimensions[excel_row].height = max(preview.height * 0.75, 20)
+                else:
+                    c.value = "生成失败"
+                    c.font = Font(name="微软雅黑", size=10, color="FF0000")
+                    c.alignment = center_align
+                    ws.row_dimensions[excel_row].height = 25
+                    
+                c = ws.cell(row=excel_row, column=4, value=preset_path)
+                c.font = cell_font; c.alignment = cell_align; c.border = thin_border
 
-        cell_font = Font(name="微软雅黑", size=10)
-        cell_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
-        center_align = Alignment(horizontal="center", vertical="center")
-        thin_border = Border(
-            left=Side(style="thin"), right=Side(style="thin"),
-            top=Side(style="thin"), bottom=Side(style="thin"),
-        )
+                # Save progress contextually
+                if processed_count % 50 == 0:
+                    try:
+                        wb.save(output_path)
+                        print(f"  💾 已保存进度: {processed_count}/{total}")
+                    except Exception as save_err:
+                        print(f"  ⚠️ 保存失败: {save_err}")
 
-        # Col A
-        c = ws.cell(row=excel_row, column=1, value=i + 1)
-        c.font = cell_font; c.alignment = center_align; c.border = thin_border
-        # Col B
-        c = ws.cell(row=excel_row, column=2, value=filename)
-        c.font = cell_font; c.alignment = cell_align; c.border = thin_border
-        # Col C
-        c = ws.cell(row=excel_row, column=3)
-        c.border = thin_border
-        if preview is not None:
-            tmp_path = os.path.join(temp_dir, f"preview_{i}.png")
-            preview.save(tmp_path, format="PNG")
-            xl_img = XlImage(tmp_path)
-            xl_img.width = PREVIEW_WIDTH
-            xl_img.height = preview.height
-            ws.add_image(xl_img, f"C{excel_row}")
-            ws.row_dimensions[excel_row].height = max(preview.height * 0.75, 20)
-        else:
-            c.value = "生成失败"
-            c.font = Font(name="微软雅黑", size=10, color="FF0000")
-            c.alignment = center_align
-            ws.row_dimensions[excel_row].height = 25
-        # Col D
-        c = ws.cell(row=excel_row, column=4, value=preset_path)
-        c.font = cell_font; c.alignment = cell_align; c.border = thin_border
-
-        # Save every 50 rows to reduce disk I/O pressure
-        if (i + 1) % 50 == 0:
-            try:
-                wb.save(output_path)
-                print(f"  💾 已保存进度: {i + 1}/{total}")
-            except Exception as save_err:
-                print(f"  ⚠️ 保存失败: {save_err}")
-
-    # Final save
-    print()
-    print(f"正在保存 Excel 到: {output_path}")
-    wb.save(output_path)
-
-    # Cleanup temp files
-    try:
-        shutil.rmtree(temp_dir)
-    except Exception:
-        pass
+        # Final save
+        print()
+        print(f"正在保存 Excel 到: {output_path}")
+        wb.save(output_path)
 
     elapsed = time.time() - start_time
     print()
@@ -370,7 +389,7 @@ def main():
     print(f"   总预设数: {total}")
     print(f"   成功: {success_count}")
     print(f"   失败: {fail_count}")
-    print(f"   页数: {total_sheets}")
+    print(f"   总页数: {total_sheets}")
     print(f"   输出: {output_path}")
     print("=" * 60)
 
