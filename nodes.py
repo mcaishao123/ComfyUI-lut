@@ -537,11 +537,13 @@ class PresetCatalogGenerator:
         from openpyxl.drawing.image import Image as XlImage
         from openpyxl.utils import get_column_letter
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        import comfy.model_management
 
         if not os.path.isdir(preset_folder):
             print(f"[Catalog] Error: folder not found: {preset_folder}")
             return (output_excel, 0, 0)
 
+        # ... (rest stays the same until the inner loop)
         # Get first image from batch as numpy
         img_np = image[0].cpu().numpy().astype(np.float32)
 
@@ -609,6 +611,9 @@ class PresetCatalogGenerator:
                 files_in_folder.sort()
                 
                 for idx, preset_path in enumerate(files_in_folder):
+                    # Check for ComfyUI interrupt signal
+                    comfy.model_management.throw_exception_if_processing_interrupted()
+                    
                     sheet_idx = idx // rows_per_sheet
                     row_in_sheet = idx % rows_per_sheet
 
