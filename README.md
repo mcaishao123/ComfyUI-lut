@@ -60,3 +60,18 @@ Load Image → LRTemplate Apply ← LRTemplate Loader
 cd custom_nodes\ComfyUI-lut
 ..\..\python_embeded\python.exe generate_preset_catalog.py "D:\你的图片.jpg" "D:\预设文件夹路径" "D:\输出的预设目录.xlsx"
 ```
+
+## 终极武器：深度抽取私有预设 (HALD CUBE 提取法)
+
+有些顶级的 Lightroom 预设（特别是使用了“相机校准 Camera Calibration”或大量局部蒙版提亮的复杂预设）使用了 Adobe 底层闭源的私有光影运算引擎，纯 Python 节点无法 100% 完美解析它。
+
+对于这种“死忠预设”，我们提供了一个降维提取武器：**`hald_tool.py`** 脚本。它可以把任何 PS/LR 里的神仙调色参数，强行抽出成一个 100% 分毫不差的 `.cube`。
+
+**使用步骤：**
+1. 在命令行运行：`python hald_tool.py`，脚本会在当前目录下生成一张五颜六色的格子图 `neutral_lut_64.png`。
+2. 用 Photoshop 打开这张 `neutral_lut_64.png`。
+3. 选中该图层，点击菜单栏：**滤镜 -> Camera Raw 滤镜**。
+4. 应用你最喜欢的那个神仙 LR 预设，点击确定。
+5. 将变色后的图片 **另存为** 同一张图的目录，命名必须为：`modified_lut_64.png`。
+6. 再次在命令行运行：`python hald_tool.py`。
+7. 大功告成！同目录下会自动生成一个 `my_extracted_color.cube`。直接把它扔进 ComfyUI 的 `CUBE LUT Apply` 节点里加载，你就能得到全宇宙最纯正的画质了！

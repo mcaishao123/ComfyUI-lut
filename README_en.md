@@ -60,3 +60,18 @@ You can also run the catalog generator entirely headless via command line:
 cd custom_nodes\ComfyUI-lut
 ..\..\python_embeded\python.exe generate_preset_catalog.py "D:\your_image.jpg" "D:\preset_folder" "D:\catalog_output.xlsx"
 ```
+
+## The Ultimate Weapon: Extracting Proprietary Presets (HALD CUBE Method)
+
+Due to Adobe's closed-source proprietary color engines (especially concerning "Camera Calibration" and complex local masks), pure Python nodes cannot mathematically replicate 100% of advanced Lightroom presets perfectly. 
+
+For these "stubborn presets", we provide an ultimate extraction weapon: the **`hald_tool.py`** script. It forces any proprietary PS/LR color-grading to be baked into a mathematically perfect, 100% accurate `.cube` file.
+
+**Usage Instructions:**
+1. Run `python hald_tool.py` in your terminal. It will generate a colorful grid image named `neutral_lut_64.png`.
+2. Open `neutral_lut_64.png` in Photoshop.
+3. Select the image layer, go to the top menu: **Filter -> Camera Raw Filter...**
+4. Apply your complex LR/XMP preset, and click OK.
+5. Save the modified, color-graded image back to the folder exactly as: `modified_lut_64.png`.
+6. Run `python hald_tool.py` one more time.
+7. Done! A perfectly accurate `my_extracted_color.cube` will be generated. Simply load this file into the `CUBE LUT Apply` node in ComfyUI to achieve the exact Photoshop quality!

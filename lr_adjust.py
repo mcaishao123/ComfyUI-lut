@@ -222,11 +222,19 @@ def _build_curve_lut(points: list) -> np.ndarray:
     if xy_pairs[-1][0] < 255:
         xy_pairs.append((255.0, 255.0))
 
-    # Interpolate
+    # Interpolate using Monotone Cubic Spline (PCHIP)
     xs = [p[0] for p in xy_pairs]
     ys = [p[1] for p in xy_pairs]
 
-    lut = np.interp(np.arange(256), xs, ys) / 255.0
+    try:
+        from scipy.interpolate import PchipInterpolator
+        interpolator = PchipInterpolator(xs, ys)
+        lut_vals = interpolator(np.arange(256))
+    except ImportError:
+        lut_vals = np.interp(np.arange(256), xs, ys)
+
+    # Ensure LUT stays in bounds
+    lut = np.clip(lut_vals, 0.0, 255.0) / 255.0
     return lut.astype(np.float32)
 
 
