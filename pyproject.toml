@@ -1,0 +1,13 @@
+[project]
+name = "comfyui-lrtemplate"
+description = "ComfyUI nodes for loading and applying Adobe Lightroom .lrtemplate presets as image filters. Supports exposure, contrast, tone curves, HSL, split toning, vignette, grain, and more."
+version = "1.0.0"
+license = "MIT"
+
+[project.urls]
+Repository = "https://github.com/comfyui-lrtemplate"
+
+[tool.comfy]
+PublisherId = "comfyui-lut"
+DisplayName = "ComfyUI-LRTemplate"
+Icon = ""
