@@ -299,7 +299,7 @@ def main():
                 if row_in_sheet == 0:
                     # Create a new sheet
                     if len(files_in_folder) > ROWS_PER_SHEET:
-                        sheet_name = f"{safe_folder}[{sheet_idx}]"
+                        sheet_name = f"{safe_folder}({sheet_idx})"
                     else:
                         sheet_name = safe_folder
                     

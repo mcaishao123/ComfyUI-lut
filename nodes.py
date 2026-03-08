@@ -619,7 +619,7 @@ class PresetCatalogGenerator:
 
                     if row_in_sheet == 0:
                         if len(files_in_folder) > rows_per_sheet:
-                            sheet_name = f"{safe_folder}[{sheet_idx}]"
+                            sheet_name = f"{safe_folder}({sheet_idx})"
                         else:
                             sheet_name = safe_folder
                         
